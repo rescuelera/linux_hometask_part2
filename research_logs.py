@@ -3,6 +3,7 @@ import argparse
 from os import listdir
 from os.path import isfile, join
 import json
+import re
 
 parser = argparse.ArgumentParser(description='Process some logs.')
 parser.add_argument('--folder', type=Path, default=None,
@@ -21,11 +22,18 @@ if args.file is not None:
     filename_list = [args.file]
 else:
     folder_path: Path = args.folder
-    filename_list = [f for f in listdir(args.folder) if isfile(join(args.folder, f)) and f.endswith(".log")]
+    filename_list = [Path.joinpath(folder_path, f) for f in listdir(args.folder) if isfile(join(args.folder, f)) and f.endswith(".log")]
 
 ip_dict = {}
 ip_long_time = {}
-
+regular_expression = (
+    r'^(?P<ip_address>\d+\.\d+.\d+.\d+)(.+\[)'
+    r'(?P<date_time>\d+\/\w+\/\d+:\d+:\d+:\d+\s\+\d+)(]\s\")'
+    r'(?P<method>\w+)(\s)(?P<url>.+)(\s)'
+    r'(?P<http_version>HTTP\/\d\.*\d*)(\"\s)'
+    r'(?P<http_code>\d+)(.*\s)'
+    r'(?P<duration>\d+)$'
+)
 ip_time_max = [-1, -1, -1]
 all_information = {}
 request_counts = {}
@@ -35,25 +43,30 @@ for filename in filename_list:
         for input_line in infile:
             if input_line == "":
                 continue
-            input_cols = input_line.split()
-            ip_time = input_cols[-1]
+            regular_expression_match = re.search(regular_expression, input_line)
+            found_values = regular_expression_match.groupdict()
+            if not found_values:
+                continue
+            ip_time = found_values["duration"]
             ip_time_number = int(ip_time)
             min_time = min(ip_time_max)
+            ip = found_values["ip_address"]
             if min_time < ip_time_number:
-                method = input_cols[5].strip('"')
-                time_information = input_cols[3].strip('[')
-                all_information[
-                    ip_time_number] = f"{method} {input_cols[6]} {input_cols[0]} {input_cols[-1]} {time_information}"
+                method = found_values["method"]
+                time_information = found_values["date_time"]
+                all_information[ip_time_number] = (
+                    f'{method} {found_values["url"]} {ip} {ip_time} {time_information}'
+                )
                 if min_time in all_information:
                     del all_information[min_time]
                 ip_time_max.remove(min_time)
                 ip_time_max.append(ip_time_number)
-            ip = input_cols[0]
+
             if ip in ip_dict:
                 ip_dict[ip] += 1
             else:
                 ip_dict[ip] = 1
-            method = input_cols[5].strip('"')
+            method = found_values["method"]
             total_request_count += 1
             if method in request_counts:
                 request_counts[method] += 1
